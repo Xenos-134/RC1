@@ -8,14 +8,14 @@ dd if=/dev/urandom of=send.dat bs=1000 count=5
 LD_PRELOAD="./log-packets.so" \
     PACKET_LOG="receiver-packets.log" \
     DROP_PATTERN="00" \
-    ./file-receiver receive.dat 1234 1 &
+    ./file-receiver receive.dat 1234 3 &
 RECEIVER_PID=$!
 sleep .1
 
 LD_PRELOAD="./log-packets.so" \
     PACKET_LOG="sender-packets.log" \
-    DROP_PATTERN="0110011" \
-    ./file-sender send.dat localhost 1234 1 || true
+    DROP_PATTERN="00" \
+    ./file-sender send.dat localhost 1234 3 || true
 
 wait $RECEIVER_PID || true
 

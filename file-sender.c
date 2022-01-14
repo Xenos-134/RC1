@@ -73,7 +73,6 @@ int main(int argc, char *argv[]) {
       {
         close(sockfd);
         fclose(file);
-        printf("FAILED TO SEND DATA CLOSING SENDER\n");
         exit(EXIT_FAILURE);
       }
     }
@@ -110,12 +109,12 @@ int main(int argc, char *argv[]) {
 
     if(timeout != -1) //If ack arrived in indicated time window
     {
-      printf("    SENDER SELECTIVE ACKS %d\n\t\t", ntohl(ack_pkt.selective_acks));
-      for(int i=0; i<32; i++)
-      {
-        printf("%d ", (ntohl(ack_pkt.selective_acks)>>i)%2);
-      }
-      printf("\n");
+      //printf("    SENDER SELECTIVE ACKS %d\n\t\t", ntohl(ack_pkt.selective_acks));
+      // for(int i=0; i<32; i++)
+      // {
+      //   printf("%d ", (ntohl(ack_pkt.selective_acks)>>i)%2);
+      // }
+      // printf("\n");
       prev_acks = cur_acks;
       cur_acks = ntohl(ack_pkt.selective_acks);
       if(cur_acks != prev_acks) num_of_fr=0;
@@ -125,7 +124,7 @@ int main(int argc, char *argv[]) {
         ++bottom_pkt;
       } 
     }else{
-      printf("XXX TimeOut For Packet (%d)\n", ntohl(data_pkt.seq_num));
+      //printf("XXX TimeOut For Packet (%d)\n", ntohl(data_pkt.seq_num));
       seq_num=bottom_pkt;
       prev_acks = cur_acks;
     }
