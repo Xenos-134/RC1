@@ -61,7 +61,7 @@ int main(int argc, char *argv[]) {
   //    Defenition of the timeout of 4s
   //**********************************************
   struct timeval tv;
-  tv.tv_sec = 4;
+  tv.tv_sec = RECEIVER_INCOMPLETE_TIMEOUT/1000;
   tv.tv_usec = 0;
   setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -70,14 +70,13 @@ int main(int argc, char *argv[]) {
   //**********************************************
   int bot_pkt = 0; // seq_num first packet in receiver windows that we are waiting
   uint32_t received_pkts = 0;
+  uint32_t actual_win = 0;
 
   ssize_t len;
   int last_pkt = -1; // last packet
 
   do { // Iterate over segments, until last the segment is detected.
     // Receive segment.
-    printf("\n");
-    //(1)
 
 
     len =
@@ -87,7 +86,6 @@ int main(int argc, char *argv[]) {
 
     if(len == -1)
     {
-      printf("ABORTING\n");
       close(sockfd);
       fclose(file); 
       exit(EXIT_FAILURE);
@@ -98,41 +96,49 @@ int main(int argc, char *argv[]) {
     //**********************************************
     // Drop that packet and resend our bot packet
     //********************************************** 
-    printf("    (%d-%d)\n",ntohl(data_pkt.seq_num), bot_pkt);
+
     if(ntohl(data_pkt.seq_num)-bot_pkt>=ws){ //Drop packet that arent inside receiver window
-      printf("DROP PACKET AND SEND BOT PACKET%d\n", ntohl(data_pkt.seq_num));
+  
       len = sizeof(data_pkt_t);
       ack_pkt.seq_num = htonl(bot_pkt);
-      //printf("(RECEIVER) ASKING FOR (%d)\n", ntohl(ack_pkt.seq_num));
+
       sendto(sockfd, &ack_pkt,  sizeof(ack_pkt), 0,
                     (struct sockaddr *)&src_addr, sizeof(src_addr));
       continue;
     }
 
     received_pkts = received_pkts | (1<<ntohl(data_pkt.seq_num));
+
+
     // Write data to file.
     if(ntohl(data_pkt.seq_num)==bot_pkt){
-      printf(" ADVANCE RECEIVER WINDOW\n");
       ++bot_pkt; //We received 
       //ADVANCE RECEIVER WINDOW TO NEXT EMPTY PACKT
       //ws = 2 here
       for(int i=bot_pkt; i<bot_pkt+ws; i++){
-        printf(" i(%d)", i);
+        //printf(" i(%d)", i);
         if((received_pkts>>i)%2 == 0){
           bot_pkt = i;
-          printf("\t\t\t NEW BOTTOM PACKET %d\n", bot_pkt);
+
           break;
         }
+      }
+    } 
+
+    actual_win = 0;
+    for(int i=bot_pkt; i<bot_pkt+ws; i++){
+      if(((received_pkts)>>(i+bot_pkt))%2 == 1){
+        actual_win = actual_win | (1<<i);
       }
     }
 
 
 
-    // sendto(sockfd, &ack_pkt,  sizeof(ack_pkt), 0,
-    //               (struct sockaddr *)&src_addr, sizeof(src_addr));
-    ack_pkt.selective_acks = htonl(received_pkts);
+
+    //ack_pkt.selective_acks = htonl(received_pkts);
+    ack_pkt.selective_acks = htonl(actual_win);
     ack_pkt.seq_num = htonl(bot_pkt);
-    sendto(sockfd, &ack_pkt, sizeof(ack_pkt_t)+offsetof(ack_pkt_t, seq_num)+offsetof(ack_pkt_t, selective_acks), 0,
+    sendto(sockfd, &ack_pkt, sizeof(ack_pkt_t), 0,
                   (struct sockaddr *)&src_addr, sizeof(src_addr));
           
 
@@ -141,24 +147,23 @@ int main(int argc, char *argv[]) {
     fseek(file, (ntohl(data_pkt.seq_num))*sizeof(data_pkt.data), SEEK_SET);
     fwrite(data_pkt.data, 1, len - offsetof(data_pkt_t, data), file);
 
-    //FAZER AQUI UM CONDICAO QUE VERIFICA QUE CASO RECEBEMOS ULTIMO PACKET MAS 
-    // AINDA EXISTEM SEGMENTOS QUE NAO FORAM RESPONDIDOS FAZER NAO PERMITIR TERMINAR
-    //FAZER 
+
 
     if(len != sizeof(data_pkt_t)){ 
       last_pkt = ntohl(data_pkt.seq_num);
     }
 
+    //Calculates number of remaining unacked segments when we received "last" packet of senders
     int num_of_nack = 0;
-    for(int i = 0; i <= last_pkt; i++){
+    //aqui antes comecava em 0
+    for(int i = bot_pkt; i <= last_pkt; i++){ //Only runs if we have last packet
       if((received_pkts>>i)%2 == 0){
         ++num_of_nack;
       }
     }
-
-    //if(last_pkt != -1 && num_of_nack==0){
+    //Doesnt allow receiver terminate in case if it received packet that len != sizeof(packet)
     if(last_pkt == -1 || num_of_nack!=0){
-      //printf("                      RECEIVED NOT ALL PACKETS\n");
+      //printf("                      RECEIVED NOT ALL PACKETS %d\n", num_of_nack);
       len = sizeof(data_pkt_t);
     }
 
@@ -169,7 +174,7 @@ int main(int argc, char *argv[]) {
   // }while(true);
 
   //
-  tv.tv_sec = 2;
+  tv.tv_sec = RECEIVER_COMPLETE_TIMEOUT/1000;
   tv.tv_usec = 0;
   setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -181,20 +186,20 @@ int main(int argc, char *argv[]) {
   //********************************************** 
   
   do{
-      printf("WAITING ADITIONAL 2 SEC\n");
       len =
         recvfrom(sockfd, &data_pkt, sizeof(data_pkt), 0,
                  (struct sockaddr *)&src_addr, &(socklen_t){sizeof(src_addr)}); 
 
       if(len != TIMEOUT){
         ack_pkt.seq_num = htonl(bot_pkt);
-        sendto(sockfd, &ack_pkt,  sizeof(ack_pkt), 0,
+
+
+         sendto(sockfd, &ack_pkt, sizeof(ack_pkt_t), 0,
                   (struct sockaddr *)&src_addr, sizeof(src_addr));
       }
   }while(len != TIMEOUT);
           
   // Clean up and exit.
-  printf("RECEIVER CLOSING\n");
   close(sockfd);
   fclose(file);
   return EXIT_SUCCESS;

@@ -49,7 +49,7 @@ int main(int argc, char *argv[]) {
   //    Defenition of the timeout of 1s
   //**********************************************
   struct timeval tv;
-  tv.tv_sec = 1;
+  tv.tv_sec = RETRANSMIT_TIMEOUT/1000;
   tv.tv_usec = 0;
   setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -63,22 +63,22 @@ int main(int argc, char *argv[]) {
   int num_of_packets = ftell(file)/sizeof(data_pkt.data);
   fseek(file, 0L, SEEK_SET);
   
-  uint32_t received_pkts = 0;
+  //uint32_t received_pkts = 0;
 
   do { // Generate segments from file, until the the end of the file.
     // Prepare data segment.
-    if(num_of_fails==3){
+    if(num_of_fails==MAX_RETRIES){
         fclose(file);
         close(sockfd);
-        printf("(FAIL) CLOSING SENDER\n");
+        //printf("(FAIL) CLOSING SENDER\n");
         exit(EXIT_FAILURE);
     }
 
-    //seq_num = bot_pkt;
     while((seq_num-bot_pkt)<ws && seq_num <= num_of_packets){ //
       data_pkt.seq_num = htonl(seq_num++);
-      if((ntohl(ack_pkt.selective_acks)>>(seq_num-1))%2 == 1) {
-        printf("\t\t\t WE ALREADY SENT THAT PACKET\n");
+  
+      if((ntohl(ack_pkt.selective_acks)>>((seq_num-1)-bot_pkt))%2 == 1){
+
         continue;
       }
       // Load data from file.
@@ -102,25 +102,16 @@ int main(int argc, char *argv[]) {
     // int timeout  =  recvfrom(sockfd, &ack_pkt, sizeof(ack_pkt), 0,
     //              (struct sockaddr *)&srv_addr, &(socklen_t){sizeof(srv_addr)});
 
-    int timeout  =  recvfrom(sockfd, &ack_pkt, sizeof(ack_pkt_t) + offsetof(ack_pkt_t, selective_acks)+offsetof(ack_pkt_t, seq_num), 0,
+    int timeout  =  recvfrom(sockfd, &ack_pkt, sizeof(ack_pkt_t), 0,
                  (struct sockaddr *)&srv_addr, &(socklen_t){sizeof(srv_addr)});
-    printf("========================\n");
-    received_pkts = ntohl(ack_pkt.selective_acks);
-    for(int i=0; i<15; i++){
-      if((ntohl(ack_pkt.selective_acks)>>i)%2 == 0){ 
-        printf(" o");
-      }else{
-        printf(" v");
-      }
-    }
-    printf("\n");
+
 
     //**********************************************
     //    If sender have not received any responses
     // in 1 sec
     //**********************************************
     if(timeout == TIMEOUT){ //Timeout ocurred just dont allow sender terminate
-      printf("(SENDER) TIMEOUT\n");
+      //printf("(SENDER) TIMEOUT\n");
 
       fseek(file, (seq_num-1)*sizeof(data_pkt.data), SEEK_SET);
       fseek(file, 0L, SEEK_SET);
@@ -137,14 +128,12 @@ int main(int argc, char *argv[]) {
     //OUR BOTTOM PACKET WAS RECEIVED
     if(ntohl(ack_pkt.seq_num)>bot_pkt){
       bot_pkt =  ntohl(ack_pkt.seq_num);
-      printf("    BOT PACKET %d\n", bot_pkt);
     }
 
 
 
   } while (!(feof(file) && data_len < sizeof(data_pkt.data)) || bot_pkt != num_of_packets+1);
 
-  printf("(CLOSING SENDER %d-%d)\n", num_of_packets, bot_pkt);
   // Clean up and exit.
   close(sockfd);
   fclose(file);
